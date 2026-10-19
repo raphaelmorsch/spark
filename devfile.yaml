@@ -21,14 +21,85 @@ components:
       mountSources: true
 
 commands:
-  - id: verify-spark
+  # ==========================================================
+  # Instalação automática das dependências
+  # ==========================================================
+
+  - id: install-spark-dependencies
     exec:
       component: tools
+      label: Install Spark Connect Dependencies
       commandLine: |
-        oc get sparkapplications -n ${SPARK_NS}
-      workingDir: ${PROJECT_SOURCE}
+        set -eu
+
+        echo "========================================"
+        echo " Configurando ambiente Spark Connect"
+        echo "========================================"
+
+        VENV=/projects/.venv-spark
+
+        if [ ! -f "$VENV/bin/python" ]; then
+          echo "Criando ambiente virtual Python..."
+          /usr/bin/python3 -m venv "$VENV"
+        fi
+
+        echo "Instalando dependencias..."
+
+        "$VENV/bin/python" -m pip install \
+          pyspark==4.0.1 \
+          pandas \
+          pyarrow \
+          grpcio \
+          grpcio-status \
+          zstandard
+
+        echo "========================================"
+        echo " Dependencias instaladas!"
+        echo "========================================"
+
+        "$VENV/bin/python" -c \
+          "import pyspark; print('PySpark:', pyspark.__version__)"
+
+  # ==========================================================
+  # Testar conexão com Spark Connect
+  # ==========================================================
+
+  - id: test-spark-connect
+    exec:
+      component: tools
+      label: Test Spark Connect
+      commandLine: |
+        python -c "
+        import os
+        from pyspark.sql import SparkSession
+
+        spark = (
+            SparkSession.builder
+            .remote(os.environ['SPARK_REMOTE'])
+            .getOrCreate()
+        )
+
+        print('Spark Version:', spark.version)
+        print('Count:', spark.range(1000).count())
+
+        spark.stop()
+        "
+      group:
+        kind: test
+
+  # ==========================================================
+  # Consultar SparkApplications existentes
+  # ==========================================================
+
+  - id: list-spark-applications
+    exec:
+      component: tools
+      label: List Spark Applications
+      commandLine: |
+        oc get sparkapplications -n repositorio
       group:
         kind: run
+
 
   - id: bootstrap-ai-assistant
     exec:
@@ -231,3 +302,4 @@ commands:
 events:
   postStart:
     - bootstrap-ai-assistant
+    - install-spark-dependencies
