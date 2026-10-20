@@ -19,6 +19,22 @@ components:
       cpuLimit: "4"
 
       mountSources: true
+      
+      env:
+        - name: SPARK_NAMESPACE
+          value: redhat-ods-applications
+
+        - name: SPARK_REMOTE
+          value: sc://spark-connect-server.redhat-ods-applications.svc.cluster.local:15002
+
+        - name: VIRTUAL_ENV
+          value: /projects/.venv-spark
+
+        - name: PATH
+          value: /projects/.venv-spark/bin:/usr/local/bin:/usr/bin:/bin
+
+        - name: PYTHONUNBUFFERED
+          value: "1"      
 
 commands:
   # ==========================================================
