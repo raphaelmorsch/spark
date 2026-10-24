@@ -4,8 +4,7 @@ metadata:
   name: ai-code-assistant
   displayName: AI Code Assistant
   description: >
-    OpenShift Dev Spaces workspace prepared to consume
-    OpenAI-compatible models such as OpenShift AI vLLM.
+    Workspace com OpenCode e Python para Spark no OpenShift AI.
 
 components:
   - name: tools
@@ -19,10 +18,16 @@ components:
       cpuLimit: "4"
 
       mountSources: true
-      
+
       env:
         - name: PATH
           value: /home/user/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+        - name: PYTHONPATH
+          value: /projects/python-packages
+
+        - name: PYTHONUNBUFFERED
+          value: "1"
 
         - name: SPARK_NAMESPACE
           value: redhat-ods-applications
@@ -30,60 +35,72 @@ components:
         - name: SPARK_REMOTE
           value: sc://spark-connect-server.redhat-ods-applications.svc.cluster.local:15002
 
-        - name: VIRTUAL_ENV
-          value: /projects/.venv-spark
-
-        - name: PATH
-          value: /projects/.venv-spark/bin:/usr/local/bin:/usr/bin:/bin
-
-        - name: PYTHONUNBUFFERED
-          value: "1"      
-
 commands:
-  # ==========================================================
-  # Instalação automática das dependências
-  # ==========================================================
-  
   - id: initialize-workspace
     exec:
       component: tools
       label: Initialize workspace
       workingDir: ${PROJECT_SOURCE}
       commandLine: |
-        set -eu
+        bash <<'BASH'
+        export PATH="$HOME/.local/bin:$PATH"
 
-        bash scripts/bootstrap-spark-python.sh
-        bash scripts/bootstrap-ai-assistant.sh
-  # ==========================================================
-  # Testar conexão com Spark Connect
-  # ==========================================================
+        LOG=/projects/workspace-bootstrap.log
+
+        (
+          set -eu
+
+          echo "========================================"
+          echo "Preparando workspace: $(date)"
+          echo "Diretório: $PWD"
+          echo "========================================"
+
+          echo "Preparando Python..."
+          bash scripts/bootstrap-spark-python.sh
+
+          echo "Preparando OpenCode..."
+          bash scripts/bootstrap-ai-assistant.sh
+
+          echo "PREPARACAO CONCLUIDA"
+        ) > "$LOG" 2>&1
+
+        RESULT=$?
+
+        cat "$LOG"
+
+        if [ "$RESULT" -ne 0 ]; then
+          echo
+          echo "ATENCAO: a preparação falhou."
+          echo "O workspace será aberto para diagnóstico."
+          echo "Consulte: /projects/workspace-bootstrap.log"
+        fi
+
+        exit 0
+        BASH
 
   - id: test-spark-connect
     exec:
       component: tools
       label: Test Spark Connect
       commandLine: |
-        python -c "
+        /usr/bin/python3.11 <<'PY'
         import os
         from pyspark.sql import SparkSession
 
         spark = (
             SparkSession.builder
-            .remote(os.environ['SPARK_REMOTE'])
+            .remote(os.environ["SPARK_REMOTE"])
             .getOrCreate()
         )
 
-        print('Spark Version:', spark.version)
-        print('Count:', spark.range(1000).count())
-
-        spark.stop()
-        "
+        try:
+            print("Spark Version:", spark.version)
+            print("Count:", spark.range(1000).count())
+        finally:
+            spark.stop()
+        PY
       group:
         kind: test
-
-  # ==========================================================
-  # Consultar SparkApplications existentes
-  # ==========================================================
 
   - id: list-spark-applications
     exec:
@@ -94,59 +111,54 @@ commands:
       group:
         kind: run
 
-
-  # ==========================================================
-  # Testar conexão com o modelo de IA
-  # ==========================================================
-
   - id: test-ai-connection
     exec:
-      label: Test AI Connection
       component: tools
+      label: Test AI Connection
       commandLine: |
-        if [ -z "${AI_BASE_URL:-}" ] || [ -z "${AI_MODEL:-}" ]; then
-          echo "AI_BASE_URL and AI_MODEL must be configured."
-          exit 1
-        fi
+        /usr/bin/python3.11 <<'PY'
+        import json
+        import os
+        import urllib.request
 
-        AUTH_HEADER=""
+        base_url = os.environ.get("AI_BASE_URL", "").rstrip("/")
+        model = os.environ.get("AI_MODEL", "")
+        api_key = os.environ.get("AI_API_KEY", "")
 
-        if [ -n "${AI_API_KEY:-}" ]; then
-          AUTH_HEADER="Authorization: Bearer ${AI_API_KEY}"
-        fi
+        if not base_url or not model:
+            raise SystemExit("Configure AI_BASE_URL e AI_MODEL.")
 
-        if [ -n "$AUTH_HEADER" ]; then
-          curl -fsS \
-            "${AI_BASE_URL%/}/chat/completions" \
-            -H "$AUTH_HEADER" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"model\": \"${AI_MODEL}\",
-              \"messages\": [
+        headers = {"Content-Type": "application/json"}
+
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        payload = {
+            "model": model,
+            "messages": [
                 {
-                  \"role\": \"user\",
-                  \"content\": \"Reply exactly with: AI connection OK\"
+                    "role": "user",
+                    "content": "Reply exactly with: AI connection OK",
                 }
-              ],
-              \"stream\": false,
-              \"max_tokens\": 32
-            }" | python3 -m json.tool
-        else
-          curl -fsS \
-            "${AI_BASE_URL%/}/chat/completions" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"model\": \"${AI_MODEL}\",
-              \"messages\": [
-                {
-                  \"role\": \"user\",
-                  \"content\": \"Reply exactly with: AI connection OK\"
-                }
-              ],
-              \"stream\": false,
-              \"max_tokens\": 32
-            }" | python3 -m json.tool
-        fi
+            ],
+            "stream": False,
+            "max_tokens": 32,
+        }
+
+        request = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=120) as response:
+            result = json.load(response)
+
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        PY
+      group:
+        kind: test
 
 events:
   postStart:
