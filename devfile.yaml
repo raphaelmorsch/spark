@@ -21,6 +21,9 @@ components:
       mountSources: true
       
       env:
+        - name: PATH
+          value: /home/user/.local/bin:/usr/local/bin:/usr/bin:/bin
+
         - name: SPARK_NAMESPACE
           value: redhat-ods-applications
 

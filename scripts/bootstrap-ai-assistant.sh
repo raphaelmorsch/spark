@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-set -u
+export PATH="$HOME/.local/bin:$PATH"
+
+npm config set prefix "$HOME/.local"
 
 echo "============================================"
 echo " AI Code Assistant bootstrap"
