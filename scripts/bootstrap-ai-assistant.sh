@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+
+set -u
+
+echo "============================================"
+echo " AI Code Assistant bootstrap"
+echo "============================================"
+
+echo "User: $(whoami)"
+echo "Home: $HOME"
+
+#
+# OpenCode
+#
+
+npm config set prefix "$HOME/.local"
+
+if ! command -v opencode >/dev/null 2>&1; then
+    echo
+    echo "Installing OpenCode 1.18.35..."
+
+    if ! npm install -g opencode-ai@1.18.35; then
+    echo
+    echo "WARNING: OpenCode installation failed."
+    echo "The workspace will still be started."
+    exit 0
+    fi
+fi
+
+echo
+echo "OpenCode:"
+command -v opencode
+opencode --version
+
+#
+# AI configuration
+#
+
+if [ -z "${AI_BASE_URL:-}" ]; then
+    echo
+    echo "WARNING: AI_BASE_URL is not configured."
+    echo "OpenCode was installed, but no AI provider was configured."
+    exit 0
+fi
+
+if [ -z "${AI_MODEL:-}" ]; then
+    echo
+    echo "WARNING: AI_MODEL is not configured."
+    echo "OpenCode was installed, but no AI provider was configured."
+    exit 0
+fi
+
+mkdir -p "$HOME/.config/opencode"
+
+node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+function clean(value) {
+    if (!value) return "";
+
+    return value
+    .trim()
+    .replace(/^['"]+/, "")
+    .replace(/['"]+$/, "");
+}
+
+const baseURL = clean(process.env.AI_BASE_URL)
+    .replace(/\/+$/, "");
+
+const model = clean(process.env.AI_MODEL);
+
+const providerName =
+    clean(process.env.AI_PROVIDER_NAME) ||
+    "OpenShift AI";
+
+const apiKey =
+    clean(process.env.AI_API_KEY);
+
+const options = {
+    baseURL: "{env:AI_BASE_URL}"
+};
+
+if (apiKey) {
+    options.apiKey = "{env:AI_API_KEY}";
+}
+
+const config = {
+    "$schema": "https://opencode.ai/config.json",
+
+    "model": `devspaces/${model}`,
+
+    "provider": {
+    "devspaces": {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": providerName,
+        "options": options,
+        "models": {
+        [model]: {
+            "name": model,
+            "limit": {
+            "context": 32768,
+            "output": 4096
+            }
+        }
+        }
+    }
+    }
+};
+
+const configPath = path.join(
+    process.env.HOME,
+    ".config",
+    "opencode",
+    "opencode.json"
+);
+
+fs.writeFileSync(
+    configPath,
+    JSON.stringify(config, null, 2)
+);
+
+console.log(`Generated ${configPath}`);
+console.log(`Provider : ${providerName}`);
+console.log(`Base URL : ${baseURL}`);
+console.log(`Model    : ${model}`);
+console.log(
+    `API key  : ${apiKey ? "configured" : "not configured"}`
+);
+NODE
+
+echo
+echo "============================================"
+echo " AI Code Assistant ready"
+echo "============================================"
+echo
+echo "Provider: ${AI_PROVIDER_NAME:-OpenShift AI}"
+echo "Endpoint: ${AI_BASE_URL}"
+echo "Model:    ${AI_MODEL}"
+echo
+echo "Test with:"
+echo "  opencode run \"Reply exactly with: AI connection OK\""
+echo
+
+exit 0
