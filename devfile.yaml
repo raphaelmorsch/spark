@@ -232,6 +232,58 @@ commands:
       group:
         kind: run
 
+  - id: configure-spark-network
+    exec:
+      component: tools
+      label: Liberar acesso de rede ao Spark Connect
+      commandLine: |
+        set -eu
+
+        WORKSPACE_NAMESPACE="$(
+          cat /var/run/secrets/kubernetes.io/serviceaccount/namespace
+        )"
+
+        TARGET_NAMESPACE="${SPARK_NAMESPACE:-redhat-ods-applications}"
+
+        echo "Workspace: $WORKSPACE_NAMESPACE"
+        echo "Spark: $TARGET_NAMESPACE"
+        echo "Identidade usada:"
+        oc whoami
+
+        if [ "$(oc auth can-i create networkpolicies.networking.k8s.io \
+          -n "$TARGET_NAMESPACE")" != "yes" ]; then
+          echo "Sem permissão para criar NetworkPolicies em $TARGET_NAMESPACE."
+          echo "Execute esta task com credenciais autorizadas."
+          exit 1
+        fi
+
+        cat <<EOF | oc apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-${WORKSPACE_NAMESPACE}-to-spark
+          namespace: ${TARGET_NAMESPACE}
+        spec:
+          podSelector:
+            matchLabels:
+              spark-role: connect-server
+              sparkoperator.k8s.io/launched-by-spark-operator: "true"
+          policyTypes:
+            - Ingress
+          ingress:
+            - from:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: ${WORKSPACE_NAMESPACE}
+              ports:
+                - protocol: TCP
+                  port: 15002
+        EOF
+
+        echo "Regra de acesso ao Spark Connect aplicada."
+      group:
+        kind: run  
+
 events:
   postStart:
     - initialize-workspace
